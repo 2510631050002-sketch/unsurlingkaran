@@ -46,6 +46,12 @@ UNSUR: dict[str, Unsur] = {
     "Garis Singgung": Unsur("GARIS", "Garis yang menyentuh lingkaran tepat pada satu titik, tegak lurus terhadap jari-jari menuju titik singgung.", "#ffe66d"),
 }
 
+EN: dict[str, str] = {
+    "Titik Pusat": "Center point", "Jari-jari": "Radius", "Diameter": "Diameter",
+    "Keliling": "Circumference", "Busur": "Arc", "Tali Busur": "Chord", "Juring": "Sector",
+    "Tembereng": "Segment", "Apotema": "Apothem", "Garis Singgung": "Tangent line",
+}
+
 # ------------------------------------------------------- GEOMETRI & LED
 
 
@@ -208,6 +214,7 @@ svg{height:100%;max-width:100%;border:1px solid #284965;border-radius:22px;backg
    <div class="row"><div class="btn" data-act="mode:dwell" id="m-dwell">✋ Tahan 1 dtk</div><div class="btn" data-act="mode:pinch" id="m-pinch">🤏 Cubit</div></div>
    <div class="btn" id="camBtn" style="justify-content:center;min-height:40px;font-size:12px">📷 Aktifkan Kamera</div>
    <div class="row"><div class="btn" data-act="cam:down">🔅 Redup</div><div class="btn" data-act="cam:up">🔆 Terang</div></div>
+   <div class="btn" id="sndBtn" data-act="snd:toggle" style="justify-content:center;min-height:40px;font-size:12px">🔊 Suara: Hidup</div>
    <div class="status" id="status">Kamera mati. Mouse tetap bisa dipakai.</div>
   </div>
   <div class="main">
@@ -230,9 +237,20 @@ const DATA=__DATA__, DWELL_MS=1000, PINCH_ON=.28, PINCH_OFF=.42;
 const $=id=>document.getElementById(id), root=$('root'), ptr=$('ptr'), ring=$('ring'), vid=$('vid');
 let aktif=null, mode='dwell';
 
-function pilih(n){
+let suara=true;
+function bicara(n){
+  if(!suara||!('speechSynthesis' in window))return;
+  const sy=speechSynthesis; sy.cancel();
+  const mk=(teks,lang)=>{const u=new SpeechSynthesisUtterance(teks);u.lang=lang;u.rate=.85;
+    const v=sy.getVoices().find(x=>x.lang.replace('_','-').toLowerCase().startsWith(lang.slice(0,2)));if(v)u.voice=v;return u;};
+  sy.speak(mk(n.replace('-',' '),'id-ID')); sy.speak(mk(DATA[n].en,'en-US'));
+}
+function toggleSuara(){suara=!suara;if(!suara&&'speechSynthesis' in window)speechSynthesis.cancel();
+  $('sndBtn').textContent=suara?'🔊 Suara: Hidup':'🔇 Suara: Mati';}
+function pilih(n,ucap=false){
   aktif=n; const d=DATA[n]; root.style.setProperty('--c',d.warna);
-  $('t').textContent=n.toUpperCase(); $('k').textContent=d.kategori;
+  $('t').textContent=n.toUpperCase(); $('k').textContent=d.en.toUpperCase()+' • '+d.kategori;
+  if(ucap)bicara(n);
   $('it').textContent='✧ Mengenal '+n; $('id').textContent=d.deskripsi;
   const r=$('ir'); r.style.display=d.rumus?'inline-block':'none'; r.textContent=d.rumus;
   $('layer').innerHTML=d.svg;
@@ -243,7 +261,7 @@ function setMode(m){mode=m;$('m-dwell').classList.toggle('active',m==='dwell');$
 let br=1.6;
 function setCam(){vid.style.filter=`brightness(${br.toFixed(2)}) contrast(1.1) saturate(1.1)`;}
 function ubahCam(v){br=Math.min(3,Math.max(.8,br+(v==='up'?.2:-.2)));setCam();status('Kecerahan kamera: '+Math.round(br*100)+'%');}
-function aksi(a){const [j,v]=a.split(':'); if(j==='unsur')pilih(v); else if(j==='mode')setMode(v); else if(j==='cam')ubahCam(v);}
+function aksi(a){const [j,v]=a.split(':'); if(j==='unsur')pilih(v,true); else if(j==='mode')setMode(v); else if(j==='cam')ubahCam(v); else if(j==='snd')toggleSuara();}
 setCam();
 function status(s){$('status').textContent=s}
 
@@ -301,7 +319,7 @@ function reset(){document.querySelectorAll('.hover').forEach(x=>x.classList.remo
 
 def bangun_html() -> str:
     data = {n: {"kategori": u.kategori, "deskripsi": u.deskripsi, "warna": u.warna,
-                "rumus": u.rumus, "svg": RENDERER[n](u.warna)} for n, u in UNSUR.items()}
+                "rumus": u.rumus, "en": EN[n], "svg": RENDERER[n](u.warna)} for n, u in UNSUR.items()}
     payload = json.dumps(data, ensure_ascii=False).replace("</", "<\\/")
     return TEMPLATE.replace("__DATA__", payload)
 
@@ -330,5 +348,7 @@ with st.expander("ℹ️ Petunjuk penggunaan untuk guru"):
         "2. Angkat **satu tangan** dengan telapak menghadap kamera. Titik putih di ujung telunjuk adalah pointer.\n"
         "3. **Mode Tahan:** arahkan pointer ke tombol unsur dan diamkan 1 detik sampai lingkaran terisi penuh.\n"
         "4. **Mode Cubit:** arahkan pointer ke tombol, lalu temukan ibu jari dan telunjuk (titik berubah pink).\n"
-        "5. Pencahayaan sebaiknya cukup dan latar tidak terlalu ramai. Mouse tetap berfungsi sebagai cadangan."
+        "5. Setiap unsur yang dipilih akan disebutkan dalam bahasa Indonesia lalu bahasa Inggris "
+        "(contoh: \"jari jari\" → \"radius\"). Suara bisa dimatikan lewat tombol **Suara**.\n"
+        "6. Pencahayaan sebaiknya cukup dan latar tidak terlalu ramai. Mouse tetap berfungsi sebagai cadangan."
     )
