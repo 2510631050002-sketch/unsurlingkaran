@@ -1,9 +1,12 @@
-"""NEON CIRCLE - Media pembelajaran interaktif unsur-unsur lingkaran.
+"""NEON CIRCLE - versi kontrol gerakan jari (webcam + MediaPipe Hands).
 
-Jalankan dengan:  streamlit run neon_circle.py
+Jalankan:  streamlit run neon_circle_kamera.py
+Buka lewat http://localhost:8501 (atau HTTPS) agar browser mengizinkan kamera.
+Pelacakan tangan berjalan 100% di browser; video tidak dikirim ke server.
 """
 from __future__ import annotations
 
+import json
 import math
 from dataclasses import dataclass
 from typing import Callable
@@ -11,88 +14,15 @@ from typing import Callable
 import streamlit as st
 import streamlit.components.v1 as components
 
-# =====================================================
-# 1. KONFIGURASI
-# =====================================================
+st.set_page_config(page_title="NEON CIRCLE | Kontrol Jari", page_icon="⭕",
+                   layout="wide", initial_sidebar_state="collapsed")
 
-st.set_page_config(
-    page_title="NEON CIRCLE | Media Pembelajaran",
-    page_icon="⭕",
-    layout="wide",
-    initial_sidebar_state="collapsed",
-)
-
-CX, CY, R = 300, 300, 205      # pusat & jari-jari kanvas SVG
-DURASI_LED = 1.6               # total detik animasi nyala LED per unsur
+CX, CY, R = 300, 300, 205
+DURASI_LED = 1.6
 Point = tuple[float, float]
+O: Point = (CX, CY)
 
-CSS = """
-<style>
-@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;800&family=Poppins:wght@300;400;500;600;700&display=swap');
-
-.stApp {
-    background:
-        radial-gradient(ellipse at 75% 40%, #122b43 0%, transparent 50%),
-        linear-gradient(135deg, #070c18, #0b1425 55%, #080d19);
-    color: #eaf6ff;
-    font-family: 'Poppins', sans-serif;
-}
-header[data-testid="stHeader"] { background: transparent; }
-.block-container { padding-top: 2rem; padding-bottom: 2rem; max-width: 1450px; }
-#MainMenu, footer { visibility: hidden; }
-
-.neon-title {
-    font-family: 'Orbitron', sans-serif; text-align: center;
-    font-size: clamp(28px, 4vw, 43px); font-weight: 800; letter-spacing: 5px;
-    color: #8af5ff;
-    text-shadow: 0 0 5px #00eaff, 0 0 15px #00bfff, 0 0 35px #008cff;
-}
-.neon-subtitle {
-    text-align: center; color: #94b6d0; font-size: 13px;
-    letter-spacing: 2px; margin-top: -5px;
-}
-.section-title {
-    font-family: 'Orbitron', sans-serif; font-size: 15px; color: #79eaff;
-    letter-spacing: 2px; margin-bottom: 12px;
-}
-
-div.stButton > button {
-    width: 100%; text-align: left; min-height: 43px; border-radius: 10px;
-    border: 1px solid #24415c; background: rgba(15, 31, 51, 0.85);
-    color: #d8edff; font-size: 13px; font-weight: 500;
-    transition: all 0.25s ease;
-}
-div.stButton > button:hover {
-    background: rgba(0, 190, 230, 0.12); border-color: #00eaff; color: #70f5ff;
-    box-shadow: 0 0 12px rgba(0, 234, 255, 0.3); transform: translateX(3px);
-}
-div.stButton > button:focus-visible { outline: 2px solid #00eaff; outline-offset: 2px; }
-div.stButton > button[kind="primary"] {
-    background: linear-gradient(100deg, #103d59, #142b4b);
-    border: 1px solid #00eaff; color: #8af5ff;
-    box-shadow: 0 0 12px rgba(0, 234, 255, 0.25);
-}
-
-.panel {
-    background: rgba(11, 25, 43, 0.83); border: 1px solid #23435e;
-    border-radius: 16px; padding: 20px; margin-top: 14px;
-    box-shadow: 0 0 22px rgba(0, 180, 255, 0.07);
-}
-.info-title { color: #70eaff; font-weight: 700; font-size: 17px; }
-.info-text  { color: #b6cbe0; font-size: 13px; line-height: 1.8; }
-.rumus {
-    display: inline-block; margin-top: 6px; padding: 4px 12px;
-    border: 1px dashed #2f5877; border-radius: 8px;
-    color: #8af5ff; font-family: 'Orbitron', sans-serif; font-size: 12px;
-}
-.small-note { color: #668ba9; font-size: 11px; }
-hr { border-color: #203a53; }
-</style>
-"""
-
-# =====================================================
-# 2. DATA UNSUR
-# =====================================================
+# ---------------------------------------------------------------- DATA
 
 
 @dataclass(frozen=True)
@@ -104,405 +34,295 @@ class Unsur:
 
 
 UNSUR: dict[str, Unsur] = {
-    "Titik Pusat": Unsur(
-        "TITIK",
-        "Titik yang terletak tepat di tengah lingkaran. Titik pusat menjadi acuan "
-        "untuk menentukan jarak ke seluruh titik pada keliling lingkaran.",
-        "#ffe66d",
-    ),
-    "Jari-jari": Unsur(
-        "GARIS",
-        "Jari-jari adalah garis yang menghubungkan titik pusat lingkaran dengan satu "
-        "titik pada keliling lingkaran. Panjang semua jari-jari dalam satu lingkaran sama.",
-        "#00eaff",
-        "r = ½ × d",
-    ),
-    "Diameter": Unsur(
-        "GARIS",
-        "Diameter adalah tali busur terpanjang: garis lurus yang menghubungkan dua titik "
-        "pada keliling lingkaran dan melewati titik pusat. Panjangnya dua kali jari-jari.",
-        "#ff54d9",
-        "d = 2 × r",
-    ),
-    "Keliling": Unsur(
-        "GARIS LENGKUNG",
-        "Keliling adalah panjang seluruh garis lengkung yang membatasi bagian luar lingkaran.",
-        "#00eaff",
-        "K = 2πr = πd",
-    ),
-    "Busur": Unsur(
-        "GARIS LENGKUNG",
-        "Busur adalah bagian dari garis lengkung keliling lingkaran yang menghubungkan "
-        "dua titik pada lingkaran.",
-        "#ffe66d",
-        "panjang busur = (θ/360°) × 2πr",
-    ),
-    "Tali Busur": Unsur(
-        "GARIS",
-        "Tali busur adalah garis lurus yang menghubungkan dua titik pada keliling lingkaran.",
-        "#ff54d9",
-    ),
-    "Juring": Unsur(
-        "DAERAH",
-        "Juring adalah daerah dalam lingkaran yang dibatasi oleh dua jari-jari dan satu busur.",
-        "#00eaff",
-        "luas juring = (θ/360°) × πr²",
-    ),
-    "Tembereng": Unsur(
-        "DAERAH",
-        "Tembereng adalah daerah dalam lingkaran yang dibatasi oleh sebuah tali busur "
-        "dan busur lingkaran.",
-        "#ff54d9",
-    ),
-    "Apotema": Unsur(
-        "GARIS",
-        "Apotema adalah garis terpendek dari titik pusat lingkaran menuju tali busur, "
-        "dengan posisi tegak lurus terhadap tali busur.",
-        "#8cffb0",
-        "a = √(r² − (½·tali busur)²)",
-    ),
-    "Garis Singgung": Unsur(
-        "GARIS",
-        "Garis singgung adalah garis yang menyentuh lingkaran tepat pada satu titik. "
-        "Garis ini tegak lurus terhadap jari-jari yang ditarik menuju titik singgung.",
-        "#ffe66d",
-    ),
+    "Titik Pusat": Unsur("TITIK", "Titik yang terletak tepat di tengah lingkaran. Titik pusat menjadi acuan untuk menentukan jarak ke seluruh titik pada keliling lingkaran.", "#ffe66d"),
+    "Jari-jari": Unsur("GARIS", "Garis yang menghubungkan titik pusat dengan satu titik pada keliling lingkaran. Panjang semua jari-jari dalam satu lingkaran sama.", "#00eaff", "r = ½ × d"),
+    "Diameter": Unsur("GARIS", "Tali busur terpanjang: garis lurus yang menghubungkan dua titik pada keliling dan melewati titik pusat. Panjangnya dua kali jari-jari.", "#ff54d9", "d = 2 × r"),
+    "Keliling": Unsur("GARIS LENGKUNG", "Panjang seluruh garis lengkung yang membatasi bagian luar lingkaran.", "#00eaff", "K = 2πr = πd"),
+    "Busur": Unsur("GARIS LENGKUNG", "Bagian dari garis lengkung keliling lingkaran yang menghubungkan dua titik pada lingkaran.", "#ffe66d", "panjang busur = (θ/360°) × 2πr"),
+    "Tali Busur": Unsur("GARIS", "Garis lurus yang menghubungkan dua titik pada keliling lingkaran.", "#ff54d9"),
+    "Juring": Unsur("DAERAH", "Daerah dalam lingkaran yang dibatasi oleh dua jari-jari dan satu busur.", "#00eaff", "luas juring = (θ/360°) × πr²"),
+    "Tembereng": Unsur("DAERAH", "Daerah dalam lingkaran yang dibatasi oleh sebuah tali busur dan busur lingkaran.", "#ff54d9"),
+    "Apotema": Unsur("GARIS", "Garis terpendek dari titik pusat menuju tali busur, tegak lurus terhadap tali busur.", "#8cffb0", "a = √(r² − (½·tali busur)²)"),
+    "Garis Singgung": Unsur("GARIS", "Garis yang menyentuh lingkaran tepat pada satu titik, tegak lurus terhadap jari-jari menuju titik singgung.", "#ffe66d"),
 }
 
-# =====================================================
-# 3. PRIMITIF GEOMETRI & LED
-# =====================================================
+# ------------------------------------------------------- GEOMETRI & LED
 
 
 def polar(sudut: float, radius: float = R) -> Point:
-    """Titik pada lingkaran untuk sudut tertentu (derajat, searah jarum jam di SVG)."""
     rad = math.radians(sudut)
     return CX + radius * math.cos(rad), CY + radius * math.sin(rad)
 
 
-def led_titik(x: float, y: float, warna: str, delay: float = 0.0, ukuran: float = 3.5) -> str:
-    return (
-        f'<g class="led" style="--delay:{delay:.3f}s">'
-        f'<circle cx="{x:.2f}" cy="{y:.2f}" r="{ukuran * 3:.2f}" fill="{warna}" opacity="0.18"/>'
-        f'<circle cx="{x:.2f}" cy="{y:.2f}" r="{ukuran * 1.7:.2f}" fill="{warna}" opacity="0.42"/>'
-        f'<circle cx="{x:.2f}" cy="{y:.2f}" r="{ukuran:.2f}" fill="{warna}" '
-        f'stroke="white" stroke-width="0.55"/></g>'
-    )
+def led_titik(x: float, y: float, w: str, delay: float = 0.0, s: float = 3.5) -> str:
+    return (f'<g class="led" style="--delay:{delay:.3f}s">'
+            f'<circle cx="{x:.1f}" cy="{y:.1f}" r="{s*3:.1f}" fill="{w}" opacity=".18"/>'
+            f'<circle cx="{x:.1f}" cy="{y:.1f}" r="{s*1.7:.1f}" fill="{w}" opacity=".42"/>'
+            f'<circle cx="{x:.1f}" cy="{y:.1f}" r="{s:.1f}" fill="{w}" stroke="white" stroke-width=".55"/></g>')
 
 
-def led_garis(p1: Point, p2: Point, warna: str, jumlah: int = 35) -> str:
+def led_garis(p1: Point, p2: Point, w: str, n: int = 35) -> str:
+    return "".join(led_titik(p1[0] + (p2[0]-p1[0])*i/n, p1[1] + (p2[1]-p1[1])*i/n, w, i/n*DURASI_LED)
+                   for i in range(n + 1))
+
+
+def led_busur(a: float, b: float, w: str, n: int = 55, tutup: bool = False) -> str:
     out = []
-    for i in range(jumlah + 1):
-        t = i / jumlah
-        out.append(
-            led_titik(
-                p1[0] + (p2[0] - p1[0]) * t,
-                p1[1] + (p2[1] - p1[1]) * t,
-                warna,
-                t * DURASI_LED,
-            )
-        )
+    for i in range(n if tutup else n + 1):
+        t = i / n
+        x, y = polar(a + (b - a) * t)
+        out.append(led_titik(x, y, w, t * DURASI_LED, 3.1))
     return "".join(out)
 
 
-def led_busur(awal: float, akhir: float, warna: str, jumlah: int = 55, tutup: bool = False) -> str:
-    """LED sepanjang busur. `tutup=True` untuk lingkaran penuh (tanpa titik ganda)."""
-    n = jumlah if tutup else jumlah + 1
-    out = []
-    for i in range(n):
-        t = i / jumlah
-        x, y = polar(awal + (akhir - awal) * t)
-        out.append(led_titik(x, y, warna, t * DURASI_LED, 3.1))
-    return "".join(out)
-
-
-def penanda(p: Point, label: str, warna: str) -> str:
+def penanda(p: Point, label: str, w: str) -> str:
     x, y = p
-    return (
-        f'<circle cx="{x:.2f}" cy="{y:.2f}" r="8" fill="{warna}" opacity="0.2"/>'
-        f'<circle cx="{x:.2f}" cy="{y:.2f}" r="4" fill="white" stroke="{warna}" stroke-width="2"/>'
-        f'<text x="{x + 11:.2f}" y="{y - 11:.2f}" class="label" fill="#ffffff" '
-        f'font-size="15" font-weight="600">{label}</text>'
-    )
+    return (f'<circle cx="{x:.1f}" cy="{y:.1f}" r="8" fill="{w}" opacity=".2"/>'
+            f'<circle cx="{x:.1f}" cy="{y:.1f}" r="4" fill="white" stroke="{w}" stroke-width="2"/>'
+            f'<text x="{x+11:.1f}" y="{y-11:.1f}" class="label" fill="#fff" font-size="17" font-weight="600">{label}</text>')
 
 
-def teks(x: float, y: float, isi: str, warna: str = "#fff", ukuran: int = 15,
-         anchor: str = "start") -> str:
-    return (
-        f'<text x="{x:.2f}" y="{y:.2f}" fill="{warna}" font-size="{ukuran}" '
-        f'font-weight="600" text-anchor="{anchor}" class="label">{isi}</text>'
-    )
+def teks(x: float, y: float, isi: str, w: str, size: int = 15, anchor: str = "start") -> str:
+    return (f'<text x="{x:.1f}" y="{y:.1f}" fill="{w}" font-size="{size}" font-weight="600" '
+            f'text-anchor="{anchor}" class="label">{isi}</text>')
 
 
-def siku_siku(sudut: Point, arah1: Point, arah2: Point, warna: str, s: float = 12) -> str:
-    """Simbol siku-siku di `sudut`; arah1/arah2 adalah vektor satuan kedua sisi."""
-    x, y = sudut
-    a = (x + arah1[0] * s, y + arah1[1] * s)
-    b = (x + (arah1[0] + arah2[0]) * s, y + (arah1[1] + arah2[1]) * s)
-    c = (x + arah2[0] * s, y + arah2[1] * s)
-    return (
-        f'<path d="M {a[0]:.2f} {a[1]:.2f} L {b[0]:.2f} {b[1]:.2f} L {c[0]:.2f} {c[1]:.2f}" '
-        f'fill="none" stroke="{warna}" stroke-width="2.5" class="softglow"/>'
-    )
+def siku_siku(p: Point, a1: Point, a2: Point, w: str, s: float = 12) -> str:
+    x, y = p
+    pts = [(x + a1[0]*s, y + a1[1]*s), (x + (a1[0]+a2[0])*s, y + (a1[1]+a2[1])*s), (x + a2[0]*s, y + a2[1]*s)]
+    return (f'<path d="M {pts[0][0]:.1f} {pts[0][1]:.1f} L {pts[1][0]:.1f} {pts[1][1]:.1f} L {pts[2][0]:.1f} {pts[2][1]:.1f}" '
+            f'fill="none" stroke="{w}" stroke-width="2.5" class="label"/>')
 
 
-def bidang(path_d: str, warna: str, opacity: float) -> str:
-    return f'<path d="{path_d}" fill="{warna}" fill-opacity="{opacity}" stroke="none"/>'
+def bidang(d: str, w: str, op: float) -> str:
+    return f'<path d="{d}" fill="{w}" fill-opacity="{op}" stroke="none"/>'
 
 
-# =====================================================
-# 4. RENDERER PER UNSUR
-# =====================================================
-
-O: Point = (CX, CY)
+def r_titik_pusat(w): return led_titik(*O, w, 0, 6) + penanda(O, "O", w)
 
 
-def r_titik_pusat(w: str) -> str:
-    return led_titik(*O, w, 0, 6) + penanda(O, "O", w)
-
-
-def r_jari_jari(w: str) -> str:
+def r_jari_jari(w):
     a = polar(-40)
-    mid = ((CX + a[0]) / 2, (CY + a[1]) / 2)
-    return (
-        led_garis(O, a, w, 45) + penanda(O, "O", w) + penanda(a, "A", w)
-        + teks(mid[0] + 12, mid[1] + 18, "r", w, 19)
-    )
+    return (led_garis(O, a, w, 45) + penanda(O, "O", w) + penanda(a, "A", w)
+            + teks((CX + a[0])/2 + 12, (CY + a[1])/2 + 18, "r", w, 20))
 
 
-def r_diameter(w: str) -> str:
+def r_diameter(w):
     a, b = polar(180), polar(0)
-    return (
-        led_garis(a, b, w, 65)
-        + penanda(a, "A", w) + penanda(b, "B", w) + penanda(O, "O", w)
-        + teks(CX, CY + 30, "d", w, 19, "middle")
-    )
+    return (led_garis(a, b, w, 65) + penanda(a, "A", w) + penanda(b, "B", w) + penanda(O, "O", w)
+            + teks(CX, CY + 30, "d", w, 20, "middle"))
 
 
-def r_keliling(w: str) -> str:
-    return led_busur(0, 360, w, 125, tutup=True)
+def r_keliling(w): return led_busur(0, 360, w, 125, tutup=True)
 
 
-def r_busur(w: str) -> str:
+def r_busur(w):
     a, b = polar(-140), polar(-40)
     return led_busur(-140, -40, w) + penanda(a, "A", w) + penanda(b, "B", w)
 
 
-def r_tali_busur(w: str) -> str:
+def r_tali_busur(w):
     a, b = polar(-140), polar(-40)
     return led_garis(a, b, w, 50) + penanda(a, "A", w) + penanda(b, "B", w)
 
 
-def r_juring(w: str) -> str:
+def r_juring(w):
     a, b = polar(-120), polar(-30)
-    area = bidang(f"M {CX} {CY} L {a[0]:.2f} {a[1]:.2f} "
-                  f"A {R} {R} 0 0 1 {b[0]:.2f} {b[1]:.2f} Z", w, 0.16)
-    lx, ly = polar(-75, R * 0.55)
-    return (
-        area + led_garis(O, a, w, 30) + led_garis(O, b, w, 30)
-        + led_busur(-120, -30, w) + penanda(O, "O", w)
-        + teks(lx, ly, "Juring", w, 14, "middle")
-    )
+    lx, ly = polar(-75, R * .55)
+    return (bidang(f"M {CX} {CY} L {a[0]:.1f} {a[1]:.1f} A {R} {R} 0 0 1 {b[0]:.1f} {b[1]:.1f} Z", w, .16)
+            + led_garis(O, a, w, 30) + led_garis(O, b, w, 30) + led_busur(-120, -30, w)
+            + penanda(O, "O", w) + teks(lx, ly, "Juring", w, 15, "middle"))
 
 
-def r_tembereng(w: str) -> str:
+def r_tembereng(w):
     a, b = polar(-140), polar(-40)
-    area = bidang(f"M {a[0]:.2f} {a[1]:.2f} A {R} {R} 0 0 1 {b[0]:.2f} {b[1]:.2f} Z", w, 0.20)
-    y_tengah = (a[1] + (CY - R)) / 2
-    return (
-        area + led_busur(-140, -40, w) + led_garis(a, b, w, 45)
-        + penanda(a, "A", w) + penanda(b, "B", w)
-        + teks(CX, y_tengah + 5, "Tembereng", w, 13, "middle")
-    )
+    return (bidang(f"M {a[0]:.1f} {a[1]:.1f} A {R} {R} 0 0 1 {b[0]:.1f} {b[1]:.1f} Z", w, .2)
+            + led_busur(-140, -40, w) + led_garis(a, b, w, 45) + penanda(a, "A", w) + penanda(b, "B", w)
+            + teks(CX, (a[1] + CY - R)/2 + 5, "Tembereng", w, 14, "middle"))
 
 
-def r_apotema(w: str) -> str:
+def r_apotema(w):
     a, b = polar(-140), polar(-40)
-    m = (CX, a[1])  # titik tengah tali busur (proyeksi O ke tali busur)
-    return (
-        led_garis(a, b, "#4c6881", 45)
-        + led_garis(O, m, w, 40)
-        + penanda(O, "O", w) + penanda(m, "M", w)
-        + siku_siku(m, (0, 1), (1, 0), w)
-    )
+    m = (CX, a[1])
+    return (led_garis(a, b, "#4c6881", 45) + led_garis(O, m, w, 40) + penanda(O, "O", w)
+            + penanda(m, "M", w) + siku_siku(m, (0, 1), (1, 0), w))
 
 
-def r_garis_singgung(w: str) -> str:
+def r_garis_singgung(w):
     t = (CX + R, CY)
-    return (
-        led_garis((t[0], CY - 160), (t[0], CY + 160), w, 55)
-        + led_garis(O, t, "#00eaff", 35)
-        + penanda(O, "O", "#00eaff") + penanda(t, "T", w)
-        + siku_siku(t, (-1, 0), (0, -1), w)
-        + teks(t[0] - 10, CY - 172, "Garis Singgung", w, 13, "end")
-    )
+    return (led_garis((t[0], CY - 160), (t[0], CY + 160), w, 55) + led_garis(O, t, "#00eaff", 35)
+            + penanda(O, "O", "#00eaff") + penanda(t, "T", w) + siku_siku(t, (-1, 0), (0, -1), w)
+            + teks(t[0] - 10, CY - 172, "Garis Singgung", w, 14, "end"))
 
 
 RENDERER: dict[str, Callable[[str], str]] = {
-    "Titik Pusat": r_titik_pusat,
-    "Jari-jari": r_jari_jari,
-    "Diameter": r_diameter,
-    "Keliling": r_keliling,
-    "Busur": r_busur,
-    "Tali Busur": r_tali_busur,
-    "Juring": r_juring,
-    "Tembereng": r_tembereng,
-    "Apotema": r_apotema,
-    "Garis Singgung": r_garis_singgung,
+    "Titik Pusat": r_titik_pusat, "Jari-jari": r_jari_jari, "Diameter": r_diameter,
+    "Keliling": r_keliling, "Busur": r_busur, "Tali Busur": r_tali_busur, "Juring": r_juring,
+    "Tembereng": r_tembereng, "Apotema": r_apotema, "Garis Singgung": r_garis_singgung,
 }
 
-# =====================================================
-# 5. SVG UTAMA (di-cache per unsur)
-# =====================================================
+# ------------------------------------------------------ KOMPONEN HTML/JS
 
-
-@st.cache_data(show_spinner=False)
-def bangun_html(pilihan: str) -> str:
-    warna = UNSUR[pilihan].warna
-    visual = RENDERER[pilihan](warna)
-    return f"""
-<!DOCTYPE html>
-<html lang="id">
-<head>
-<meta charset="utf-8">
+TEMPLATE = r"""<!DOCTYPE html><html lang="id"><head><meta charset="utf-8">
 <style>
-  * {{ box-sizing: border-box; }}
-  body {{ margin: 0; background: transparent; overflow: hidden; }}
-  .canvas {{
-    width: 100%; max-width: 650px; margin: auto; padding: 12px;
-    background: radial-gradient(circle at center, #142d49 0%, #0a172a 65%, #08111f 100%);
-    border: 1px solid #284965; border-radius: 24px;
-    box-shadow: 0 0 20px rgba(0,234,255,.10), inset 0 0 25px rgba(0,234,255,.04);
-  }}
-  svg {{ display: block; width: 100%; height: auto; }}
-  .led {{
-    opacity: 0; transform-box: fill-box; transform-origin: center;
-    animation: nyala .45s ease forwards; animation-delay: var(--delay);
-  }}
-  @keyframes nyala {{
-    0%   {{ opacity: 0; transform: scale(.2); }}
-    65%  {{ opacity: 1; transform: scale(1.25); }}
-    100% {{ opacity: 1; transform: scale(1); }}
-  }}
-  @media (prefers-reduced-motion: reduce) {{
-    .led {{ animation: none; opacity: 1; }}
-  }}
-  .base-circle  {{ fill: none; stroke: #31506b; stroke-width: 2; opacity: .85; }}
-  .outer-circle {{ fill: none; stroke: #00d9ff; stroke-width: 1; opacity: .17; }}
-  .center-dot   {{ fill: #b4d8f5; }}
-  .label     {{ font-family: Arial, sans-serif; filter: drop-shadow(0 0 5px {warna}); }}
-  .softglow  {{ filter: drop-shadow(0 0 5px {warna}); }}
-</style>
-</head>
-<body>
-  <div class="canvas">
-    <svg viewBox="0 0 600 600" xmlns="http://www.w3.org/2000/svg"
-         role="img" aria-label="Ilustrasi unsur lingkaran: {pilihan}">
-      <title>{pilihan}</title>
-      <defs>
-        <pattern id="grid" width="30" height="30" patternUnits="userSpaceOnUse">
-          <circle cx="1" cy="1" r="1" fill="#31516e" opacity=".30"/>
-        </pattern>
-      </defs>
-      <rect width="600" height="600" fill="url(#grid)"/>
-      <circle cx="{CX}" cy="{CY}" r="{R}" class="base-circle"/>
-      <circle cx="{CX}" cy="{CY}" r="{R + 5}" class="outer-circle"/>
-      <circle cx="{CX}" cy="{CY}" r="3" class="center-dot"/>
-      {visual}
-    </svg>
+@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@600;800&family=Poppins:wght@400;500;600&display=swap');
+*{box-sizing:border-box} html,body{margin:0;height:100%;overflow:hidden;font-family:Poppins,sans-serif;color:#eaf6ff;background:#070c18}
+#root{position:relative;height:100vh;--c:#00eaff;border-radius:18px;overflow:hidden;border:1px solid #24415c;
+ background:radial-gradient(ellipse at 75% 40%,#122b43,transparent 55%),linear-gradient(135deg,#070c18,#0b1425)}
+video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform:scaleX(-1);opacity:0;transition:opacity .6s}
+video.on{opacity:.5}
+.shade{position:absolute;inset:0;background:linear-gradient(90deg,rgba(7,12,24,.78),rgba(7,12,24,.45) 40%,rgba(7,12,24,.6))}
+.ui{position:absolute;inset:0;display:grid;grid-template-columns:250px 1fr;gap:16px;padding:14px}
+.side{display:flex;flex-direction:column;gap:7px;min-height:0}
+.hd{font-family:Orbitron,sans-serif;color:#79eaff;letter-spacing:2px;font-size:13px;margin:2px 0 2px}
+.btn{all:unset;box-sizing:border-box;cursor:pointer;display:flex;align-items:center;min-height:46px;padding:0 14px;border-radius:12px;
+ border:1px solid #24415c;background:rgba(15,31,51,.85);color:#d8edff;font-size:14px;font-weight:500;transition:.2s}
+.btn:hover,.btn.hover{background:rgba(0,190,230,.18);border-color:#00eaff;color:#8af5ff;box-shadow:0 0 14px rgba(0,234,255,.4);transform:translateX(4px)}
+.btn.active{background:linear-gradient(100deg,#103d59,#142b4b);border-color:#00eaff;color:#8af5ff;box-shadow:0 0 12px rgba(0,234,255,.3)}
+.row{display:flex;gap:7px}.row .btn{flex:1;justify-content:center;min-height:40px;padding:0 6px;font-size:12px}
+.status{font-size:11px;color:#7ea3c2;min-height:30px;line-height:1.4}
+.main{display:flex;flex-direction:column;min-height:0;min-width:0}
+.title{text-align:center;font-family:Orbitron,sans-serif;font-weight:800;font-size:22px;letter-spacing:2px;color:var(--c);text-shadow:0 0 12px var(--c)}
+.kat{text-align:center;color:#8fb2d1;font-size:11px;letter-spacing:2px;margin-bottom:4px}
+.stage{flex:1;min-height:0;display:flex;justify-content:center}
+svg{height:100%;max-width:100%;border:1px solid #284965;border-radius:22px;background:radial-gradient(circle,rgba(20,45,73,.78),rgba(8,17,31,.8));box-shadow:0 0 20px rgba(0,234,255,.12)}
+.info{margin-top:10px;background:rgba(11,25,43,.86);border:1px solid #23435e;border-radius:14px;padding:12px 16px}
+.info b{color:#70eaff;font-size:15px}.info p{margin:4px 0;color:#c3d6e8;font-size:13px;line-height:1.6}
+.rumus{display:inline-block;padding:3px 12px;border:1px dashed #2f5877;border-radius:8px;color:#8af5ff;font-family:Orbitron,sans-serif;font-size:12px}
+.led{opacity:0;transform-box:fill-box;transform-origin:center;animation:nyala .45s ease forwards;animation-delay:var(--delay)}
+@keyframes nyala{0%{opacity:0;transform:scale(.2)}65%{opacity:1;transform:scale(1.25)}100%{opacity:1;transform:scale(1)}}
+@media (prefers-reduced-motion:reduce){.led{animation:none;opacity:1}}
+.label{font-family:Arial,sans-serif;filter:drop-shadow(0 0 5px var(--c))}
+#ptr{position:fixed;left:0;top:0;width:56px;height:56px;margin:-28px 0 0 -28px;pointer-events:none;display:none;z-index:9}
+#ptr .dot{position:absolute;left:21px;top:21px;width:14px;height:14px;border-radius:50%;background:#fff;box-shadow:0 0 14px #fff,0 0 28px var(--c)}
+#ptr.pinch .dot{background:#ff54d9;box-shadow:0 0 16px #ff54d9,0 0 30px #ff54d9;transform:scale(.8)}
+#ptr svg{position:absolute;inset:0;width:56px;height:56px;border:0;background:none;box-shadow:none;transform:rotate(-90deg)}
+</style></head><body>
+<div id="root">
+ <video id="vid" playsinline muted></video><div class="shade"></div>
+ <div class="ui">
+  <div class="side">
+   <div class="hd">✦ PILIH UNSUR</div>
+   <div id="list" style="display:flex;flex-direction:column;gap:7px"></div>
+   <div class="hd" style="margin-top:6px">KONTROL</div>
+   <div class="row"><div class="btn" data-act="mode:dwell" id="m-dwell">✋ Tahan 1 dtk</div><div class="btn" data-act="mode:pinch" id="m-pinch">🤏 Cubit</div></div>
+   <div class="btn" id="camBtn" style="justify-content:center;min-height:40px;font-size:12px">📷 Aktifkan Kamera</div>
+   <div class="status" id="status">Kamera mati. Mouse tetap bisa dipakai.</div>
   </div>
-</body>
-</html>
-"""
+  <div class="main">
+   <div class="title" id="t"></div><div class="kat" id="k"></div>
+   <div class="stage"><svg viewBox="0 0 600 600" role="img" aria-label="Ilustrasi unsur lingkaran">
+    <defs><pattern id="g" width="30" height="30" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r="1" fill="#31516e" opacity=".3"/></pattern></defs>
+    <rect width="600" height="600" fill="url(#g)"/>
+    <circle cx="300" cy="300" r="205" fill="none" stroke="#31506b" stroke-width="2" opacity=".85"/>
+    <circle cx="300" cy="300" r="210" fill="none" stroke="#00d9ff" stroke-width="1" opacity=".17"/>
+    <circle cx="300" cy="300" r="3" fill="#b4d8f5"/><g id="layer"></g></svg></div>
+   <div class="info"><b id="it"></b><p id="id"></p><span class="rumus" id="ir" style="display:none"></span></div>
+  </div>
+ </div>
+ <div id="ptr"><svg viewBox="0 0 56 56"><circle cx="28" cy="28" r="22" fill="none" stroke="rgba(255,255,255,.25)" stroke-width="4"/>
+  <circle id="ring" cx="28" cy="28" r="22" fill="none" stroke="var(--c)" stroke-width="4" stroke-linecap="round" stroke-dasharray="138.2" stroke-dashoffset="138.2"/></svg><div class="dot"></div></div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/hands.js" crossorigin="anonymous"></script>
+<script>
+const DATA=__DATA__, DWELL_MS=1000, PINCH_ON=.28, PINCH_OFF=.42;
+const $=id=>document.getElementById(id), root=$('root'), ptr=$('ptr'), ring=$('ring'), vid=$('vid');
+let aktif=null, mode='dwell';
+
+function pilih(n){
+  aktif=n; const d=DATA[n]; root.style.setProperty('--c',d.warna);
+  $('t').textContent=n.toUpperCase(); $('k').textContent=d.kategori;
+  $('it').textContent='✧ Mengenal '+n; $('id').textContent=d.deskripsi;
+  const r=$('ir'); r.style.display=d.rumus?'inline-block':'none'; r.textContent=d.rumus;
+  $('layer').innerHTML=d.svg;
+  document.querySelectorAll('[data-act^="unsur:"]').forEach(b=>b.classList.toggle('active',b.dataset.act==='unsur:'+n));
+}
+function setMode(m){mode=m;$('m-dwell').classList.toggle('active',m==='dwell');$('m-pinch').classList.toggle('active',m==='pinch');
+  status(m==='dwell'?'Mode TAHAN: arahkan telunjuk ke tombol dan diamkan 1 detik.':'Mode CUBIT: arahkan jari ke tombol, lalu temukan ibu jari dan telunjuk.');}
+function aksi(a){const [j,v]=a.split(':'); if(j==='unsur')pilih(v); else if(j==='mode')setMode(v);}
+function status(s){$('status').textContent=s}
+
+Object.keys(DATA).forEach(n=>{const b=document.createElement('div');b.className='btn';b.dataset.act='unsur:'+n;b.textContent='○  '+n;$('list').appendChild(b);});
+document.addEventListener('click',e=>{const t=e.target.closest('[data-act]');if(t)aksi(t.dataset.act);});
+pilih('Jari-jari'); setMode('dwell');
+
+// ---- Kamera & pelacakan tangan
+let hands=null, px=-100, py=-100, cur=null, since=0, locked=false, pinching=false, running=false;
+$('camBtn').addEventListener('click',startCam);
+
+async function startCam(){
+  if(running)return;
+  if(typeof Hands==='undefined'){status('Library MediaPipe gagal dimuat. Periksa koneksi internet.');return;}
+  try{
+    status('Meminta izin kamera...');
+    vid.srcObject=await navigator.mediaDevices.getUserMedia({video:{width:1280,height:720,facingMode:'user'},audio:false});
+    await vid.play(); vid.classList.add('on');
+    hands=new Hands({locateFile:f=>'https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/'+f});
+    hands.setOptions({maxNumHands:1,modelComplexity:1,minDetectionConfidence:.6,minTrackingConfidence:.5});
+    hands.onResults(hasil); running=true; $('camBtn').textContent='📷 Kamera Aktif'; $('camBtn').classList.add('active');
+    status('Mencari tangan... angkat satu tangan ke depan kamera.'); loop();
+  }catch(e){status('Kamera gagal: '+(e.name==='NotAllowedError'?'izin ditolak.':e.message));}
+}
+async function loop(){ if(vid.readyState>=2){try{await hands.send({image:vid});}catch(e){}} requestAnimationFrame(loop); }
+
+function toScreen(lm){ // cover + mirror
+  const W=innerWidth,H=innerHeight,vw=vid.videoWidth,vh=vid.videoHeight,s=Math.max(W/vw,H/vh);
+  return [W-(lm.x*vw*s-(vw*s-W)/2), lm.y*vh*s-(vh*s-H)/2];
+}
+const d2=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
+
+function hasil(r){
+  const L=r.multiHandLandmarks&&r.multiHandLandmarks[0];
+  if(!L){ptr.style.display='none';reset();status('Tangan tidak terdeteksi.');return;}
+  const rasio=d2(L[4],L[8])/(d2(L[0],L[9])||1), pinch=pinching?rasio<PINCH_OFF:rasio<PINCH_ON;
+  const [tx,ty]=mode==='pinch'?toScreen({x:(L[4].x+L[8].x)/2,y:(L[4].y+L[8].y)/2}):toScreen(L[8]);
+  px+=(tx-px)*.4; py+=(ty-py)*.4;
+  ptr.style.display='block'; ptr.style.transform=`translate(${px}px,${py}px)`; ptr.classList.toggle('pinch',mode==='pinch'&&pinch);
+  const el=document.elementFromPoint(px,py), t=el&&el.closest('[data-act]');
+  if(t!==cur){document.querySelectorAll('.hover').forEach(x=>x.classList.remove('hover'));cur=t;since=performance.now();locked=false;ring.style.strokeDashoffset=138.2;if(t)t.classList.add('hover');}
+  if(mode==='dwell'&&cur&&!locked){
+    const p=Math.min((performance.now()-since)/DWELL_MS,1); ring.style.strokeDashoffset=138.2*(1-p);
+    if(p>=1){aksi(cur.dataset.act);locked=true;ring.style.strokeDashoffset=138.2;}
+  } else if(mode==='pinch'){
+    if(pinch&&!pinching&&cur)aksi(cur.dataset.act);
+    ring.style.strokeDashoffset=138.2;
+  }
+  pinching=pinch; status('Tangan terdeteksi ✓');
+}
+function reset(){document.querySelectorAll('.hover').forEach(x=>x.classList.remove('hover'));cur=null;locked=false;pinching=false;ring.style.strokeDashoffset=138.2;}
+</script></body></html>"""
 
 
-# =====================================================
-# 6. STATE & CALLBACK
-# =====================================================
+def bangun_html() -> str:
+    data = {n: {"kategori": u.kategori, "deskripsi": u.deskripsi, "warna": u.warna,
+                "rumus": u.rumus, "svg": RENDERER[n](u.warna)} for n, u in UNSUR.items()}
+    payload = json.dumps(data, ensure_ascii=False).replace("</", "<\\/")
+    return TEMPLATE.replace("__DATA__", payload)
 
 
-def pilih_unsur(nama: str) -> None:
-    st.session_state.unsur_aktif = nama
+# ----------------------------------------------------------------- UI
 
+st.markdown("""
+<style>
+.stApp{background:linear-gradient(135deg,#070c18,#0b1425 55%,#080d19);color:#eaf6ff}
+header[data-testid="stHeader"]{background:transparent}
+.block-container{padding-top:1.5rem;max-width:1450px}
+#MainMenu,footer{visibility:hidden}
+.t{font-family:Orbitron,sans-serif;text-align:center;font-size:clamp(26px,4vw,40px);font-weight:800;letter-spacing:5px;
+color:#8af5ff;text-shadow:0 0 5px #00eaff,0 0 15px #00bfff,0 0 35px #008cff}
+.s{text-align:center;color:#94b6d0;font-size:13px;letter-spacing:2px;margin:-4px 0 14px}
+</style>
+<div class="t">NEON CIRCLE</div>
+<div class="s">GESTURE CONTROL • CIRCLE GEOMETRY</div>
+""", unsafe_allow_html=True)
 
-st.session_state.setdefault("unsur_aktif", "Jari-jari")
+components.html(bangun_html(), height=800, scrolling=False)
 
-# =====================================================
-# 7. UI
-# =====================================================
-
-st.markdown(CSS, unsafe_allow_html=True)
-st.markdown(
-    '<div class="neon-title">NEON CIRCLE</div>'
-    '<div class="neon-subtitle">INTERACTIVE LEARNING • CIRCLE GEOMETRY</div><br>',
-    unsafe_allow_html=True,
-)
-
-kiri, kanan = st.columns([0.85, 2.15], gap="large")
-
-with kiri:
-    st.markdown('<div class="section-title">✦ PILIH UNSUR</div>', unsafe_allow_html=True)
+with st.expander("ℹ️ Petunjuk penggunaan untuk guru"):
     st.markdown(
-        '<p class="small-note">Klik salah satu unsur untuk menampilkan lampu LED pada lingkaran.</p>',
-        unsafe_allow_html=True,
+        "1. Klik **Aktifkan Kamera**, lalu pilih *Allow* saat browser meminta izin.\n"
+        "2. Angkat **satu tangan** dengan telapak menghadap kamera. Titik putih di ujung telunjuk adalah pointer.\n"
+        "3. **Mode Tahan:** arahkan pointer ke tombol unsur dan diamkan 1 detik sampai lingkaran terisi penuh.\n"
+        "4. **Mode Cubit:** arahkan pointer ke tombol, lalu temukan ibu jari dan telunjuk (titik berubah pink).\n"
+        "5. Pencahayaan sebaiknya cukup dan latar tidak terlalu ramai. Mouse tetap berfungsi sebagai cadangan."
     )
-    for nama in UNSUR:
-        aktif = nama == st.session_state.unsur_aktif
-        st.button(
-            ("✦  " if aktif else "○  ") + nama,
-            key=f"pilih_{nama}",
-            type="primary" if aktif else "secondary",
-            use_container_width=True,
-            on_click=pilih_unsur,
-            args=(nama,),
-        )
-
-with kanan:
-    nama_aktif = st.session_state.unsur_aktif
-    data = UNSUR[nama_aktif]
-
-    st.markdown(
-        f"""
-        <div style="text-align:center; margin-bottom:5px;">
-          <div style="color:{data.warna}; font-family:Orbitron,sans-serif; font-size:22px;
-                      font-weight:700; letter-spacing:2px; text-shadow:0 0 12px {data.warna};">
-            {nama_aktif.upper()}</div>
-          <div style="color:#7598b9; font-size:11px; letter-spacing:2px;">{data.kategori}</div>
-        </div>""",
-        unsafe_allow_html=True,
-    )
-
-    components.html(bangun_html(nama_aktif), height=650, scrolling=False)
-
-    rumus_html = f'<div class="rumus">{data.rumus}</div>' if data.rumus else ""
-    st.markdown(
-        f"""
-        <div class="panel">
-          <div class="info-title">✧ Mengenal {nama_aktif}</div>
-          <div class="info-text">{data.deskripsi}</div>
-          {rumus_html}
-          <hr>
-          <div style="display:flex; align-items:center; gap:8px;">
-            <div style="width:10px; height:10px; border-radius:50%; background:{data.warna};
-                        box-shadow:0 0 10px {data.warna};"></div>
-            <span class="small-note">Visualisasi LED aktif: {nama_aktif}</span>
-          </div>
-        </div>""",
-        unsafe_allow_html=True,
-    )
-
-    with st.expander("🧮 Coba hitung: masukkan jari-jari"):
-        r_in = st.number_input("Jari-jari (r)", min_value=0.1, value=7.0, step=0.5)
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Diameter", f"{2 * r_in:.2f}")
-        c2.metric("Keliling", f"{2 * math.pi * r_in:.2f}")
-        c3.metric("Luas", f"{math.pi * r_in ** 2:.2f}")
-
-st.markdown(
-    """
-    <br><hr>
-    <div style="text-align:center; color:#577894; font-size:11px; letter-spacing:2px;">
-      NEON CIRCLE • MEDIA PEMBELAJARAN MATEMATIKA<br>EXPLORE • OBSERVE • UNDERSTAND
-    </div>""",
-    unsafe_allow_html=True,
-)
