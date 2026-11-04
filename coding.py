@@ -170,8 +170,8 @@ TEMPLATE = r"""<!DOCTYPE html><html lang="id"><head><meta charset="utf-8">
 #root{position:relative;height:100vh;--c:#00eaff;border-radius:18px;overflow:hidden;border:1px solid #24415c;
  background:radial-gradient(ellipse at 75% 40%,#122b43,transparent 55%),linear-gradient(135deg,#070c18,#0b1425)}
 video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform:scaleX(-1);opacity:0;transition:opacity .6s}
-video.on{opacity:.5}
-.shade{position:absolute;inset:0;background:linear-gradient(90deg,rgba(7,12,24,.78),rgba(7,12,24,.45) 40%,rgba(7,12,24,.6))}
+video.on{opacity:1}
+.shade{position:absolute;inset:0;background:linear-gradient(90deg,rgba(7,12,24,.35),rgba(7,12,24,0) 26%,rgba(7,12,24,0))}
 .ui{position:absolute;inset:0;display:grid;grid-template-columns:250px 1fr;gap:16px;padding:14px}
 .side{display:flex;flex-direction:column;gap:7px;min-height:0}
 .hd{font-family:Orbitron,sans-serif;color:#79eaff;letter-spacing:2px;font-size:13px;margin:2px 0 2px}
@@ -185,8 +185,8 @@ video.on{opacity:.5}
 .title{text-align:center;font-family:Orbitron,sans-serif;font-weight:800;font-size:22px;letter-spacing:2px;color:var(--c);text-shadow:0 0 12px var(--c)}
 .kat{text-align:center;color:#8fb2d1;font-size:11px;letter-spacing:2px;margin-bottom:4px}
 .stage{flex:1;min-height:0;display:flex;justify-content:center}
-svg{height:100%;max-width:100%;border:1px solid #284965;border-radius:22px;background:radial-gradient(circle,rgba(20,45,73,.78),rgba(8,17,31,.8));box-shadow:0 0 20px rgba(0,234,255,.12)}
-.info{margin-top:10px;background:rgba(11,25,43,.86);border:1px solid #23435e;border-radius:14px;padding:12px 16px}
+svg{height:100%;max-width:100%;border:1px solid #284965;border-radius:22px;background:rgba(8,17,31,.08);box-shadow:0 0 20px rgba(0,234,255,.12)}
+.info{margin-top:10px;background:rgba(11,25,43,.62);backdrop-filter:blur(6px);border:1px solid #23435e;border-radius:14px;padding:12px 16px}
 .info b{color:#70eaff;font-size:15px}.info p{margin:4px 0;color:#c3d6e8;font-size:13px;line-height:1.6}
 .rumus{display:inline-block;padding:3px 12px;border:1px dashed #2f5877;border-radius:8px;color:#8af5ff;font-family:Orbitron,sans-serif;font-size:12px}
 .led{opacity:0;transform-box:fill-box;transform-origin:center;animation:nyala .45s ease forwards;animation-delay:var(--delay)}
@@ -207,6 +207,7 @@ svg{height:100%;max-width:100%;border:1px solid #284965;border-radius:22px;backg
    <div class="hd" style="margin-top:6px">KONTROL</div>
    <div class="row"><div class="btn" data-act="mode:dwell" id="m-dwell">✋ Tahan 1 dtk</div><div class="btn" data-act="mode:pinch" id="m-pinch">🤏 Cubit</div></div>
    <div class="btn" id="camBtn" style="justify-content:center;min-height:40px;font-size:12px">📷 Aktifkan Kamera</div>
+   <div class="row"><div class="btn" data-act="cam:down">🔅 Redup</div><div class="btn" data-act="cam:up">🔆 Terang</div></div>
    <div class="status" id="status">Kamera mati. Mouse tetap bisa dipakai.</div>
   </div>
   <div class="main">
@@ -214,7 +215,7 @@ svg{height:100%;max-width:100%;border:1px solid #284965;border-radius:22px;backg
    <div class="stage"><svg viewBox="0 0 600 600" role="img" aria-label="Ilustrasi unsur lingkaran">
     <defs><pattern id="g" width="30" height="30" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r="1" fill="#31516e" opacity=".3"/></pattern></defs>
     <rect width="600" height="600" fill="url(#g)"/>
-    <circle cx="300" cy="300" r="205" fill="none" stroke="#31506b" stroke-width="2" opacity=".85"/>
+    <circle cx="300" cy="300" r="205" fill="none" stroke="#7fd6ff" stroke-width="2.5" opacity=".7"/>
     <circle cx="300" cy="300" r="210" fill="none" stroke="#00d9ff" stroke-width="1" opacity=".17"/>
     <circle cx="300" cy="300" r="3" fill="#b4d8f5"/><g id="layer"></g></svg></div>
    <div class="info"><b id="it"></b><p id="id"></p><span class="rumus" id="ir" style="display:none"></span></div>
@@ -239,7 +240,11 @@ function pilih(n){
 }
 function setMode(m){mode=m;$('m-dwell').classList.toggle('active',m==='dwell');$('m-pinch').classList.toggle('active',m==='pinch');
   status(m==='dwell'?'Mode TAHAN: arahkan telunjuk ke tombol dan diamkan 1 detik.':'Mode CUBIT: arahkan jari ke tombol, lalu temukan ibu jari dan telunjuk.');}
-function aksi(a){const [j,v]=a.split(':'); if(j==='unsur')pilih(v); else if(j==='mode')setMode(v);}
+let br=1.6;
+function setCam(){vid.style.filter=`brightness(${br.toFixed(2)}) contrast(1.1) saturate(1.1)`;}
+function ubahCam(v){br=Math.min(3,Math.max(.8,br+(v==='up'?.2:-.2)));setCam();status('Kecerahan kamera: '+Math.round(br*100)+'%');}
+function aksi(a){const [j,v]=a.split(':'); if(j==='unsur')pilih(v); else if(j==='mode')setMode(v); else if(j==='cam')ubahCam(v);}
+setCam();
 function status(s){$('status').textContent=s}
 
 Object.keys(DATA).forEach(n=>{const b=document.createElement('div');b.className='btn';b.dataset.act='unsur:'+n;b.textContent='○  '+n;$('list').appendChild(b);});
@@ -255,7 +260,7 @@ async function startCam(){
   if(typeof Hands==='undefined'){status('Library MediaPipe gagal dimuat. Periksa koneksi internet.');return;}
   try{
     status('Meminta izin kamera...');
-    vid.srcObject=await navigator.mediaDevices.getUserMedia({video:{width:1280,height:720,facingMode:'user'},audio:false});
+    vid.srcObject=await navigator.mediaDevices.getUserMedia({video:{width:{ideal:1920},height:{ideal:1080},facingMode:'user'},audio:false});
     await vid.play(); vid.classList.add('on');
     hands=new Hands({locateFile:f=>'https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/'+f});
     hands.setOptions({maxNumHands:1,modelComplexity:1,minDetectionConfidence:.6,minTrackingConfidence:.5});
@@ -282,7 +287,8 @@ function hasil(r){
   if(t!==cur){document.querySelectorAll('.hover').forEach(x=>x.classList.remove('hover'));cur=t;since=performance.now();locked=false;ring.style.strokeDashoffset=138.2;if(t)t.classList.add('hover');}
   if(mode==='dwell'&&cur&&!locked){
     const p=Math.min((performance.now()-since)/DWELL_MS,1); ring.style.strokeDashoffset=138.2*(1-p);
-    if(p>=1){aksi(cur.dataset.act);locked=true;ring.style.strokeDashoffset=138.2;}
+    if(p>=1){const a=cur.dataset.act;aksi(a);ring.style.strokeDashoffset=138.2;
+      if(a.startsWith('cam:'))since=performance.now(); else locked=true;}
   } else if(mode==='pinch'){
     if(pinch&&!pinching&&cur)aksi(cur.dataset.act);
     ring.style.strokeDashoffset=138.2;
